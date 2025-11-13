@@ -1,147 +1,143 @@
-# pages/web_chat.py — NEW: Chat with Website (using BeautifulSoup for scraping)
-import streamlit as st
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains import RetrievalQA
-from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain.prompts import PromptTemplate
-from langchain.schema import Document
-from src.config.settings import Settings
-from bs4 import BeautifulSoup
+# pages/web_chat.py — FIXED: output_key + clean memory handling
+import os
 import requests
-import torch  # For GPU if available
+import validators
+import streamlit as st
 from pathlib import Path
-
-
-# ------------------------------------------------------------------
-# 1. CACHED EMBEDDINGS (runs only once)
-# ------------------------------------------------------------------
-@st.cache_resource(show_spinner="Loading AI brain… (first time only)")
-def get_embeddings():
-    try:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        return HuggingFaceEmbeddings(
-            model_name="all-MiniLM-L6-v2",
-            model_kwargs={"device": device}
-        )
-    except:
-        return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
-embeddings = get_embeddings()
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.memory import ConversationBufferMemory
+from langchain.chains import ConversationalRetrievalChain
+from langchain.schema import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import DocArrayInMemorySearch
+from langchain_huggingface import HuggingFaceEmbeddings
+from src.config.settings import Settings
 
 # ------------------------------------------------------------------
-# 2. LLM
+# 1. LLM & EMBEDDINGS
 # ------------------------------------------------------------------
 def get_llm():
     return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",  # Supported in 2025
+        model="gemini-2.5-flash",
         google_api_key=Settings().GOOGLE_API_KEY,
         temperature=0
     )
 
+@st.cache_resource
+def get_embeddings():
+    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-try:
-    PROMPT_TPL = Path("src/prompts/web_prompt.txt").read_text(encoding="utf-8")
-except FileNotFoundError:
-    st.error("Create `src/prompts/web_prompt.txt`")
-    st.stop()
+# ------------------------------------------------------------------
+# 2. SCRAPE USING JINA.AI (returns clean Markdown)
+# ------------------------------------------------------------------
+def scrape_website(url: str) -> str:
+    try:
+        resp = requests.get(f"https://r.jina.ai/{url}")
+        resp.raise_for_status()
+        return resp.text
+    except Exception as e:
+        st.error(f"Failed to scrape {url}: {e}")
+        return ""
+
+# ------------------------------------------------------------------
+# 3. VECTOR DB (cached)
+# ------------------------------------------------------------------
+@st.cache_resource(show_spinner="Analyzing websites...", ttl=3600)
+def setup_vectordb(websites):
+    docs = []
+    for url in websites:
+        txt = scrape_website(url)
+        if txt:
+            docs.append(Document(page_content=txt, metadata={"source": url}))
+    if not docs:
+        return None
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    splits = splitter.split_documents(docs)
+    return DocArrayInMemorySearch.from_documents(splits, get_embeddings())
 
 # ------------------------------------------------------------------
 # 4. MAIN APP
 # ------------------------------------------------------------------
 def run():
     st.title("Web Intelligence Bot")
-    st.caption("Enter a URL → Ask anything about the website")
+    st.caption("Enter website URLs → Ask anything about their content")
 
-    # Session state
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-    if "vectorstore" not in st.session_state:
-        st.session_state.vectorstore = None
-    if "url" not in st.session_state:
-        st.session_state.url = None
+    # ---------- Sidebar ----------
+    if "websites" not in st.session_state:
+        st.session_state.websites = []
 
-    url = st.text_input("Enter Website URL", placeholder="https://example.com")
-
-    # ------------------------------------------------------------------
-    # SCRAPE & INDEX WEBSITE (general, fast)
-    # ------------------------------------------------------------------
-    if url and url != st.session_state.url:
-        with st.spinner("Scraping website… (less than 5 seconds)"):
-            try:
-                # Fetch content with BeautifulSoup
-                response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-                response.raise_for_status()
-                soup = BeautifulSoup(response.text, "html.parser")
-
-                # Extract clean text (remove scripts, styles, etc.)
-                for script in soup(["script", "style"]):
-                    script.extract()
-                text = soup.get_text(separator="\n").strip()
-
-                # Create document with metadata
-                docs = [Document(page_content=text, metadata={"source": url, "page": "Full Page"})]
-
-                # Chunking – 800 chars → fast
-                splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
-                chunks = splitter.split_documents(docs)
-
-                # Optional: Add dynamic summary from title/meta
-                title = soup.title.string if soup.title else "Website"
-                summary = Document(
-                    page_content=f"Website title: {title}. Summary: {text[:500].replace('\n', ' ')}",
-                    metadata={"page": "Summary"}
-                )
-                chunks = [summary] + chunks
-
-                # Build FAISS
-                st.session_state.vectorstore = FAISS.from_documents(chunks, embeddings)
-                st.session_state.url = url
-                st.session_state.messages = []
-
-                st.success("Ready! Ask anything about the website.")
-
-            except Exception as e:
-                st.error(f"Error scraping URL: {e}")
-
-    # ------------------------------------------------------------------
-    # QA CHAIN
-    # ------------------------------------------------------------------
-    if st.session_state.vectorstore:
-        qa = RetrievalQA.from_chain_type(
-            llm=get_llm(),
-            chain_type="stuff",
-            retriever=st.session_state.vectorstore.as_retriever(search_kwargs={"k": 5}),
-            return_source_documents=True,
-            chain_type_kwargs={"prompt": PromptTemplate.from_template(PROMPT_TPL)},
-        )
-
-        # Chat
-        for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-
-        if prompt := st.chat_input("Ask about the website…"):
-            # ----- GREETING -----
-            if prompt.strip().lower() in ["hello", "hi", "hey"]:
-                reply = "Hello! How can I help you with the website?"
+    with st.sidebar:
+        st.header("Add Websites")
+        url_input = st.text_input("Enter URL", placeholder="https://example.com")
+        if st.button("Add Website"):
+            if url_input and validators.url(url_input):
+                if url_input not in st.session_state.websites:
+                    st.session_state.websites.append(url_input)
+                    st.success(f"Added: {url_input}")
+                else:
+                    st.info("URL already added.")
             else:
-                with st.chat_message("user"):
-                    st.markdown(prompt)
-                with st.chat_message("assistant"):
-                    with st.spinner("Thinking…"):
-                        result = qa.invoke({"query": prompt})
-                        reply = result["result"]
-                        st.write(reply)
+                st.error("Invalid URL!")
 
-                        # ----- SHOW SOURCES -----
-                        if sources := result.get("source_documents"):
-                            with st.expander(f"Sources ({len(sources)})"):
-                                for doc in sources[:3]:
-                                    page = doc.metadata.get("page", "Summary")
-                                    snippet = doc.page_content.replace("\n", " ")[:200]
-                                    st.caption(f"**Page {page}**: {snippet}…")
+        if st.button("Clear All"):
+            st.session_state.websites = []
 
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            st.session_state.messages.append({"role": "assistant", "content": reply})
+        if st.session_state.websites:
+            st.write("**Active URLs:**")
+            for u in st.session_state.websites:
+                st.write(f"- {u}")
+
+    # ---------- No URLs ----------
+    if not st.session_state.websites:
+        st.info("Add at least one website URL to start.")
+        return
+
+    # ---------- Build DB ----------
+    vectordb = setup_vectordb(st.session_state.websites)
+    if not vectordb:
+        st.error("Failed to process websites.")
+        return
+
+    # ---------- Retrieval + Memory ----------
+    retriever = vectordb.as_retriever(search_type="mmr", search_kwargs={"k": 3})
+    memory = ConversationBufferMemory(
+        memory_key="chat_history",
+        output_key="answer",          # <-- THIS FIXES THE ERROR
+        return_messages=True
+    )
+    qa_chain = ConversationalRetrievalChain.from_llm(
+        llm=get_llm(),
+        retriever=retriever,
+        memory=memory,
+        return_source_documents=True
+    )
+
+    # ---------- Chat ----------
+    # Initialise chat history for this tool
+    if "web_messages" not in st.session_state:
+        st.session_state.web_messages = []
+
+    for msg in st.session_state.web_messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    if prompt := st.chat_input("Ask about the websites…"):
+        st.session_state.web_messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Searching websites…"):
+                result = qa_chain.invoke({"question": prompt})
+                answer = result["answer"]
+                st.markdown(answer)
+
+                # ---- Sources ----
+                if sources := result.get("source_documents"):
+                    with st.expander(f"Sources ({len(sources)})"):
+                        for i, doc in enumerate(sources[:3], 1):
+                            url = doc.metadata["source"]
+                            st.caption(f"**Source {i}**: [{url}]({url})")
+
+        st.session_state.web_messages.append({"role": "assistant", "content": answer})

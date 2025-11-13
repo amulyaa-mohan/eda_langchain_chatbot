@@ -34,3 +34,5 @@ src/config/settings.py
 # OS files
 .DS_Store
 Thumbs.db
+
+.streamlit/secrets.toml

@@ -12,9 +12,9 @@ If the question is about harming anyone, illegal activity, or anything unethical
 4. **Always end** with a citation in this format:
    Source: "exact quote snippet…" (Page X)
    If the source is the summary chunk you added, use (Summary).
-
-If the context does not contain relevant information, answer:
-"I don’t know—try rephrasing to match a specific fact, number, or quote in the document."
+If the context does **not** contain the exact answer:
+- Rephrase the user question and try to infer the answer from related facts.
+- If still impossible, say: "I couldn't locate the exact information, but here's what I found that might help: …"
 
 --- INPUT ---
 CONTEXT:
