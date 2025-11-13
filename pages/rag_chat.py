@@ -91,7 +91,7 @@ def run():
 
             docs = loader.load()
 
-            # Chunking – larger chunks keep context together
+            
             splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
             chunks = splitter.split_documents(docs)
 
@@ -158,7 +158,6 @@ def run():
                         
                         sources = result.get("source_documents")
                         if debug and sources:
-                            # Add similarity scores (FAISS returns them via .similarity_search_with_score)
                             
                             scored = st.session_state.vectorstore.similarity_search_with_score(prompt, k=12)
                             with st.expander(f"Debug: Retrieved {len(sources)} chunks"):

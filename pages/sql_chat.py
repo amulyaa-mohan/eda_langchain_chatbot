@@ -68,10 +68,10 @@ def run():
                 sql_result = sql_task.output.raw_output
                 viz_result = viz_task.output.raw_output
 
-            # === FIXED ORDER: Extract SQL FIRST, THEN sanitize ===
+            
             raw_sql = extract_sql(sql_result)
             if raw_sql:
-                raw_sql = raw_sql.replace('%', '%%')  # Escape % for pandas
+                raw_sql = raw_sql.replace('%', '%%') 
             else:
                 st.error("Failed to extract SQL query from agent response.")
                 st.code(sql_result, language="text")

@@ -4,10 +4,10 @@ from src.config.settings import Settings
 
 settings = Settings()
 _llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",  # Updated model (stable 2025 version)
+    model="gemini-2.5-flash",  
     google_api_key=settings.GOOGLE_API_KEY,
     temperature=0,
-    google_api_version="v1"  # Fixed API version for generateContent
+    google_api_version="v1"  
 )
 
 def create_viz_agent() -> Agent:
