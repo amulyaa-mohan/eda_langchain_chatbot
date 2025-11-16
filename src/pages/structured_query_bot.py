@@ -1,4 +1,8 @@
 # pages/sql_chat.py
+import os
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))  # Add src/ to path for imports
+
 import streamlit as st
 import pandas as pd
 from crewai import Task, Crew, Process
@@ -8,11 +12,13 @@ from db.connector import get_db
 from utils.helpers import extract_sql, auto_chart
 from pathlib import Path
 
-# Fixed prompt path
-PROMPT_TPL = Path("src/prompts/sql_prompt.txt").read_text()
+# Fixed prompt path - relative to src/
+prompt_path = Path(os.path.dirname(__file__), '..', 'prompts', 'sql_prompt.txt')
+PROMPT_TPL = prompt_path.read_text()
 
 def run():
     # Unique session state for SQL page
+    st.title("Structured Query Bot")
     session_key = "sql_messages"
     if session_key not in st.session_state:
         st.session_state[session_key] = []
@@ -98,3 +104,5 @@ def run():
             except Exception as e:
                 st.error(f"SQL Execution Error: {e}")
                 st.code(raw_sql, language="sql")
+
+run() 

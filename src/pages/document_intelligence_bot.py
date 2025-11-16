@@ -1,3 +1,11 @@
+
+import os
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))  # Path fix
+
+import torch
+torch.classes.__path__ = [os.path.join(torch.__path__[0], 'classes')]
+
 import streamlit as st
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
@@ -10,9 +18,9 @@ from langchain.schema import Document
 from src.config.settings import Settings
 import tempfile
 from pathlib import Path
-import torch  # For GPU if available
-import re   # For auto-summary
+import re   
 
+st.write("Debug:loaded successfully.")  
 
 @st.cache_resource(show_spinner="Loading AI brain… (first time only)")
 def get_embeddings():
@@ -22,19 +30,22 @@ def get_embeddings():
             model_name="all-MiniLM-L6-v2",
             model_kwargs={"device": device}
         )
-    except Exception:
-        return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    except Exception as e:
+        st.error(f"Embeddings load error: {e}")
+        return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")  
 
 embeddings = get_embeddings()
 
-
 def get_llm():
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=Settings().GOOGLE_API_KEY,
-        temperature=0
-    )
-
+    try:
+        return ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            google_api_key=Settings().GOOGLE_API_KEY,
+            temperature=0
+        )
+    except Exception as e:
+        st.error(f"LLM load error: {e}")
+        return None
 
 PROMPT_TPL = """
 You are a precise document analyst. Use **all** the supplied context to answer the question.
@@ -65,7 +76,7 @@ def run():
 
     debug = st.sidebar.checkbox("Debug Mode (show chunks & scores)")
 
-    # Session state
+
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "vectorstore" not in st.session_state:
@@ -78,51 +89,46 @@ def run():
 
     if uploaded_file and uploaded_file.name != st.session_state.file_name:
         with st.spinner("Reading & indexing…"):
-            tmp_path = Path(tempfile.gettempdir()) / uploaded_file.name
-            tmp_path.write_bytes(uploaded_file.getvalue())
+            try:
+                tmp_path = Path(tempfile.gettempdir()) / uploaded_file.name
+                tmp_path.write_bytes(uploaded_file.getvalue())
 
-            # Loader
-            if uploaded_file.name.lower().endswith(".pdf"):
-                loader = PyPDFLoader(str(tmp_path))
-            elif uploaded_file.name.lower().endswith(".txt"):
-                loader = TextLoader(str(tmp_path), encoding="utf-8")
-            else:
-                loader = Docx2txtLoader(str(tmp_path))
+                if uploaded_file.name.lower().endswith(".pdf"):
+                    loader = PyPDFLoader(str(tmp_path))
+                elif uploaded_file.name.lower().endswith(".txt"):
+                    loader = TextLoader(str(tmp_path), encoding="utf-8")
+                else:
+                    loader = Docx2txtLoader(str(tmp_path))
 
-            docs = loader.load()
+                docs = loader.load()
 
-            
-            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-            chunks = splitter.split_documents(docs)
+                splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                chunks = splitter.split_documents(docs)
 
-            # ENHANCED SUMMARY 
-            summary_facts = []
-            for i in range(min(3, len(docs))):
-                page = docs[i].page_content
-                # Title / company
-                m = re.search(r'(FORM\s+10-K|ANNUAL\s+REPORT).*?(NextNav|ACRES).*?', page, re.I)
-                if m:
-                    summary_facts.append(m.group().strip())
-                # Numbers
-                nums = re.findall(r'\$[\d,]+\.?\d*|\d{4}\s+shares?', page)
-                summary_facts.extend(nums[:2])
-                # Checkboxes
-                checks = re.findall(r'(☐|☒)\s+(Yes|No)', page)
-                summary_facts.extend([f"{c[0]} {c[1]}" for c in checks[:2]])
+                summary_facts = []
+                for i in range(min(3, len(docs))):
+                    page = docs[i].page_content
+                    m = re.search(r'(FORM\s+10-K|ANNUAL\s+REPORT).*?(NextNav|ACRES).*?', page, re.I)
+                    if m:
+                        summary_facts.append(m.group().strip())
+                    nums = re.findall(r'\$[\d,]+\.?\d*|\d{4}\s+shares?', page)
+                    summary_facts.extend(nums[:2])
+                    checks = re.findall(r'(☐|☒)\s+(Yes|No)', page)
+                    summary_facts.extend([f"{c[0]} {c[1]}" for c in checks[:2]])
 
-            summary_text = "Key facts: " + " | ".join(set(summary_facts[:6]))
-            summary = Document(page_content=summary_text, metadata={"page": "Enhanced Summary"})
-            chunks = [summary] + chunks
+                summary_text = "Key facts: " + " | ".join(set(summary_facts[:6]))
+                summary = Document(page_content=summary_text, metadata={"page": "Enhanced Summary"})
+                chunks = [summary] + chunks
 
-            # Build FAISS
-            st.session_state.vectorstore = FAISS.from_documents(chunks, embeddings)
-            st.session_state.file_name = uploaded_file.name
-            st.session_state.messages = []
+                st.session_state.vectorstore = FAISS.from_documents(chunks, embeddings)
+                st.session_state.file_name = uploaded_file.name
+                st.session_state.messages = []
 
-            st.success("Ready! Strong retrieval active.")
-
-        tmp_path.unlink(missing_ok=True)
-
+                st.success("Ready! Strong retrieval active.")
+            except Exception as e:
+                st.error(f"Indexing error: {e}")
+            finally:
+                tmp_path.unlink(missing_ok=True)
 
     if st.session_state.vectorstore:
         retriever = st.session_state.vectorstore.as_retriever(
@@ -137,13 +143,11 @@ def run():
             chain_type_kwargs={"prompt": PROMPT}
         )
 
-        # Chat
         for msg in st.session_state.messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
         if prompt := st.chat_input("Ask about the document…"):
-            # Greeting
             if prompt.strip().lower() in ["hello", "hi", "hey"]:
                 reply = "Hello! How can I help you with the document?"
             else:
@@ -151,12 +155,16 @@ def run():
                     st.markdown(prompt)
                 with st.chat_message("assistant"):
                     with st.spinner("Searching…"):
-                        result = qa.invoke({"query": prompt})
-                        reply = result["result"]
-                        st.write(reply)
+                        try:
+                            result = qa.invoke({"query": prompt})
+                            reply = result["result"]
+                            st.write(reply)
+                        except Exception as e:
+                            reply = f"Error: {str(e)}"
+                            st.error(reply)
 
                         
-                        sources = result.get("source_documents")
+                        sources = result.get("source_documents", [])
                         if debug and sources:
                             
                             scored = st.session_state.vectorstore.similarity_search_with_score(prompt, k=12)
@@ -175,3 +183,6 @@ def run():
 
             st.session_state.messages.append({"role": "user", "content": prompt})
             st.session_state.messages.append({"role": "assistant", "content": reply})
+
+run()
+

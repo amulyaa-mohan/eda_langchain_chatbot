@@ -1,23 +1,25 @@
-# Updated src/app.py — Add Web Intelligence Bot to sidebar
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import streamlit as st
 
-st.set_page_config(page_title="Smart Data Insights", layout="wide")
-st.title("Smart Data Insights Assistant")
-st.caption("AI-Powered Analytics for Databases & Documents")
+st.set_page_config(
+    page_title="Smart Data Insights Assistant",
+    page_icon='💬',
+    layout='wide'
+)
 
-page = st.sidebar.selectbox("Choose Tool", 
-    ("Structured Data Explorer", "Document Intelligence Bot", "Web Intelligence Bot"))
+st.header("Smart Data Insights Assistant")
+st.write("""
+[![view source code ](https://img.shields.io/badge/GitHub%20Repository-gray?logo=github)](https://github.com/amulyaa-mohan/eda_langchain_chatbot)
+""")  # Add your LinkedIn or other badges if desired
 
-if page == "Structured Data Explorer":
-    import pages.sql_chat as sql_chat
-    sql_chat.run()
-elif page == "Document Intelligence Bot":
-    import pages.rag_chat as rag_chat
-    rag_chat.run()
-elif page == "Web Intelligence Bot":
-    import pages.web_chat as web_chat
-    web_chat.run()
+st.write("""
+Welcome to the Smart Data Insights Assistant! This app leverages LangChain, CrewAI, and other AI tools to provide insights from structured data, documents, and the web.
+
+Key Features:
+- **Structured Query Bot**: Analyze CSVs with SQL queries and visualizations.
+- **Document Intelligence Bot**: Query PDFs using Retrieval-Augmented Generation (RAG).
+- **Web Intelligence Bot**: Scrape and query website content.
+
+Select a bot from the sidebar to get started. For more details, check the GitHub repo above.
+""")
+
+
