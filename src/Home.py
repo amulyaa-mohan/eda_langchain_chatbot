@@ -57,7 +57,7 @@ st.markdown("""
     Made with <strong>Streamlit</strong>  
     Powered by Gemini • LangChain • CrewAI  
     <br>
-    <a href="https://github.com/amulyaa-mohan/eda_langchain_chatbot" target="_blank">
+    <a href="https://github.com/amulyaa-mohan/exploratory_data_analysis_chatbot" target="_blank">
         View Source Code
     </a>
 </div>
