@@ -144,8 +144,8 @@ def extract_docs_from_vectordb(vectordb) -> List[Document]:
     return []
 
 def run():
-    st.set_page_config(page_title="Web Intelligence Bot", layout="wide")
-    st.title("🔎 Web Intelligence Bot — SEC-grade RAG (Option 2)")
+    st.set_page_config(page_title="Web Intelligence Bot 🌐", layout="wide")
+    st.title("Web Intelligence Bot")
     st.caption("Add URLs → Index → Ask questions")
 
     if "chat_history" not in st.session_state:
